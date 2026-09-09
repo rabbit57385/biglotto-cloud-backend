@@ -11,6 +11,7 @@ from momentum_engine import (
     get_recent_draws_with_grades,
     get_explosion_momentum,
     get_recovery_momentum,
+    get_reversal_momentum,
 )
 
 
@@ -180,6 +181,26 @@ def recovery_momentum(
 ):
     try:
         result = get_recovery_momentum(
+            include_special=include_special
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+    return {
+        "status": "ok",
+        "data": result,
+    }
+
+
+@app.get("/api/v1/biglotto/reversal-momentum")
+def reversal_momentum(
+    include_special: bool = False,
+):
+    try:
+        result = get_reversal_momentum(
             include_special=include_special
         )
     except Exception as e:

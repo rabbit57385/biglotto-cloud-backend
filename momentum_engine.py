@@ -823,6 +823,192 @@ def get_recovery_momentum(include_special=False):
     }
 
 
+
+# ============================================================
+# A3 反轉動能（大樂透）
+#
+# 沿用 539 已定案 A3 v3「真正跨零反轉」：
+# - 前一期方向 <= 0
+# - 目前方向 >= 0.20
+# - 方向改善 > 0
+#
+# include_special=False：主號 6/49
+# include_special=True ：主號+特別號 7/49
+# ============================================================
+
+def calculate_reversal_score(
+    r10,
+    r30,
+    r50,
+    r100,
+    previous_r10,
+    previous_r30,
+):
+    long_base = (r50 + r100) / 2.0
+    previous_direction = previous_r10 - previous_r30
+    current_direction = r10 - r30
+    direction_change = current_direction - previous_direction
+    previous_gap = max(0.0, long_base - r30)
+
+    reversal_score = (
+        previous_gap * 0.50
+        + current_direction * 0.50
+    )
+
+    return {
+        "reversal_score": round(reversal_score, 4),
+        "long_base": round(long_base, 4),
+        "previous_gap": round(previous_gap, 4),
+        "previous_direction": round(previous_direction, 4),
+        "current_direction": round(current_direction, 4),
+        "direction_change": round(direction_change, 4),
+    }
+
+
+def classify_reversal_stage(
+    previous_gap,
+    current_direction,
+):
+    if previous_gap < 0.10 and 0.20 <= current_direction < 0.30:
+        return "強反轉"
+
+    if previous_gap < 0.20 and 0.20 <= current_direction < 0.60:
+        return "反轉升溫"
+
+    if previous_gap < 0.30 and current_direction >= 0.20:
+        return "反轉延續"
+
+    return "跨零反轉"
+
+
+def get_reversal_momentum(include_special=False):
+    include_special = normalize_include_special(include_special)
+    draws = load_draws_from_db()
+
+    if len(draws) < 101:
+        raise ValueError("歷史資料不足101期，無法執行 A3 反轉動能分析")
+
+    current_results = build_analysis(
+        draws,
+        include_special=include_special,
+    )
+    previous_results = build_analysis(
+        draws[:-1],
+        include_special=include_special,
+    )
+
+    previous_map = {
+        int(item["number"]): item
+        for item in previous_results
+    }
+
+    output = []
+
+    for item in current_results:
+        number = int(item["number"])
+        previous = previous_map.get(number)
+
+        if not previous:
+            continue
+
+        r10 = float(item["r10"])
+        r30 = float(item["r30"])
+        r50 = float(item["r50"])
+        r100 = float(item["r100"])
+        previous_r10 = float(previous["r10"])
+        previous_r30 = float(previous["r30"])
+
+        reversal = calculate_reversal_score(
+            r10,
+            r30,
+            r50,
+            r100,
+            previous_r10,
+            previous_r30,
+        )
+
+        if not (
+            reversal["previous_direction"] <= 0.0
+            and reversal["current_direction"] >= 0.20
+            and reversal["direction_change"] > 0.0
+        ):
+            continue
+
+        stage = classify_reversal_stage(
+            reversal["previous_gap"],
+            reversal["current_direction"],
+        )
+
+        output.append({
+            "number": number,
+            "reversal_score": reversal["reversal_score"],
+            "stage": stage,
+            "v7_score": item["score"],
+            "grade": item["grade"],
+            "momentum_type": item["momentum_type"],
+            "momentum": {
+                "10": round(r10, 2),
+                "30": round(r30, 2),
+                "50": round(r50, 2),
+                "100": round(r100, 2),
+            },
+            "change": {
+                "long_base": reversal["long_base"],
+                "previous_gap": reversal["previous_gap"],
+                "previous_direction": reversal["previous_direction"],
+                "current_direction": reversal["current_direction"],
+                "direction_change": reversal["direction_change"],
+            },
+        })
+
+    stage_priority = {
+        "強反轉": 0,
+        "反轉升溫": 1,
+        "反轉延續": 2,
+        "跨零反轉": 3,
+    }
+
+    output.sort(
+        key=lambda x: (
+            stage_priority.get(x["stage"], 99),
+            x["change"]["previous_gap"],
+            x["change"]["current_direction"],
+            -x["reversal_score"],
+            x["number"],
+        )
+    )
+
+    return {
+        "engine_version": ENGINE_VERSION,
+        "analysis_engine": "reversal_momentum_a3_biglotto",
+        "formula_version": "a3_v3.0",
+        "analysis_mode": analysis_mode_name(include_special),
+        "include_special": include_special,
+        "expected_probability": (
+            "7/49" if include_special else "6/49"
+        ),
+        "latest_draw": build_latest_draw(draws),
+        "previous_draw": build_latest_draw(draws[:-1]),
+        "rule": {
+            "candidate": (
+                "previous_direction <= 0 and current_direction >= 0.20 "
+                "and direction_change > 0"
+            ),
+            "formula": (
+                "long_base=(r50+r100)/2; "
+                "previous_gap=max(0,long_base-r30); "
+                "reversal_score=previous_gap*0.50 + current_direction*0.50"
+            ),
+            "note": (
+                "A3 專看短期方向由弱跨零轉強，"
+                "不以反轉分數單純由高到低排列"
+            ),
+        },
+        "count": len(output),
+        "numbers": output,
+    }
+
+
 # ============================================================
 # V7 Top10
 # ============================================================
