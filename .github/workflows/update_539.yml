@@ -1,0 +1,35 @@
+name: Update 539 Draw
+
+on:
+  workflow_dispatch:
+
+  schedule:
+  # 台灣時間週一～週六 21:00、21:15、21:30
+  - cron: "0,15,30 13 * * 1-6"
+
+  # 台灣時間週一～週六 22:00 最後保險
+  - cron: "0 14 * * 1-6"
+
+permissions:
+  contents: read
+
+jobs:
+  update-539:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Update latest 539 draw
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python update_539.py
