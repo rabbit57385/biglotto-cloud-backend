@@ -9,6 +9,7 @@ from momentum_engine import (
     get_momentum_analysis,
     get_today_momentum_changes,
     get_recent_draws_with_grades,
+    get_explosion_momentum,
 )
 
 
@@ -150,6 +151,27 @@ def frozen_top5(
             "top5": result.get("frozen_top5", []),
         },
     }
+
+
+@app.get("/api/v1/biglotto/explosion-momentum")
+def explosion_momentum(
+    include_special: bool = False,
+):
+    try:
+        result = get_explosion_momentum(
+            include_special=include_special
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+    return {
+        "status": "ok",
+        "data": result,
+    }
+
 
 @app.get("/api/v1/biglotto/recent-draws")
 def recent_draws(

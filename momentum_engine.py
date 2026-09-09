@@ -512,6 +512,139 @@ def get_today_momentum_changes(include_special=False):
         "all_changes": changes,
     }
 
+
+# ============================================================
+# A1 爆發動能（大樂透）
+#
+# 沿用 539 已定案公式：
+# (r10-r30)*50% + (r30-r50)*30% + (r10-r100)*20%
+#
+# include_special=False：主號 6/49
+# include_special=True ：主號+特別號 7/49
+# ============================================================
+
+def calculate_explosion_score(r10, r30, r50, r100):
+    short_gap = r10 - r30
+    mid_gap = r30 - r50
+    long_gap = r10 - r100
+
+    explosion_score = (
+        short_gap * 0.50
+        + mid_gap * 0.30
+        + long_gap * 0.20
+    )
+
+    return {
+        "explosion_score": round(explosion_score, 4),
+        "short_gap": round(short_gap, 4),
+        "mid_gap": round(mid_gap, 4),
+        "long_gap": round(long_gap, 4),
+    }
+
+
+def classify_explosion_stage(explosion_score, r10):
+    if r10 < 1.10:
+        return "無明顯爆發"
+    if explosion_score >= 1.00:
+        return "過熱候選"
+    if explosion_score >= 0.70:
+        return "爆發延續"
+    if explosion_score >= 0.50:
+        return "升溫觀察"
+    if explosion_score >= 0.30:
+        return "強爆發"
+    if explosion_score >= 0.20:
+        return "初步升溫"
+    return "無明顯爆發"
+
+
+def get_explosion_momentum(include_special=False):
+    include_special = normalize_include_special(include_special)
+    draws = load_draws_from_db()
+    results = build_analysis(
+        draws,
+        include_special=include_special,
+    )
+
+    output = []
+
+    for item in results:
+        r10 = float(item["r10"])
+        r30 = float(item["r30"])
+        r50 = float(item["r50"])
+        r100 = float(item["r100"])
+
+        explosion = calculate_explosion_score(
+            r10, r30, r50, r100
+        )
+        explosion_score = explosion["explosion_score"]
+        stage = classify_explosion_stage(
+            explosion_score, r10
+        )
+
+        if stage == "無明顯爆發":
+            continue
+
+        output.append({
+            "number": int(item["number"]),
+            "explosion_score": explosion_score,
+            "stage": stage,
+            "v7_score": item["score"],
+            "grade": item["grade"],
+            "momentum_type": item["momentum_type"],
+            "momentum": {
+                "10": round(r10, 2),
+                "30": round(r30, 2),
+                "50": round(r50, 2),
+                "100": round(r100, 2),
+            },
+            "change": {
+                "short_gap": explosion["short_gap"],
+                "mid_gap": explosion["mid_gap"],
+                "long_gap": explosion["long_gap"],
+            },
+        })
+
+    stage_priority = {
+        "強爆發": 0,
+        "爆發延續": 1,
+        "升溫觀察": 2,
+        "初步升溫": 3,
+        "過熱候選": 4,
+    }
+
+    output.sort(
+        key=lambda x: (
+            stage_priority.get(x["stage"], 99),
+            -x["explosion_score"],
+            -x["momentum"]["10"],
+            x["number"],
+        )
+    )
+
+    return {
+        "engine_version": ENGINE_VERSION,
+        "analysis_engine": "explosion_momentum_a1_biglotto",
+        "formula_version": "a1_v1.0",
+        "analysis_mode": analysis_mode_name(include_special),
+        "include_special": include_special,
+        "expected_probability": (
+            "7/49" if include_special else "6/49"
+        ),
+        "latest_draw": build_latest_draw(draws),
+        "rule": {
+            "min_r10": 1.10,
+            "formula": (
+                "(r10-r30)*0.50 + "
+                "(r30-r50)*0.30 + "
+                "(r10-r100)*0.20"
+            ),
+        },
+        "count": len(output),
+        "numbers": output,
+    }
+
+
 # ============================================================
 # V7 Top10
 # ============================================================
