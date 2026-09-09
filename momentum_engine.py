@@ -646,6 +646,184 @@ def get_explosion_momentum(include_special=False):
 
 
 # ============================================================
+# A2 回補動能
+#
+# 回測定案公式：
+# 回補分數 = 欠缺*60% + 回升*40%
+# 欠缺 = max(0, 1-r50)*50% + max(0, 1-r100)*50%
+# 回升 = max(0, r10-r30)
+#
+# 回測觀察：
+# - 回補分數不是越高越好。
+# - 中長期欠缺較輕、且短期剛開始回升的區段較有價值。
+# - 欠缺 >= 0.30 後，回補訊號明顯轉弱，因此列為深度欠缺觀察，
+#   不排在主要回補候選之前。
+# ============================================================
+
+def calculate_recovery_score(
+    r10,
+    r30,
+    r50,
+    r100,
+):
+    shortage = (
+        max(0.0, 1.0 - r50) * 0.50
+        + max(0.0, 1.0 - r100) * 0.50
+    )
+    rebound = max(0.0, r10 - r30)
+
+    recovery_score = (
+        shortage * 0.60
+        + rebound * 0.40
+    )
+
+    return {
+        "recovery_score": round(recovery_score, 4),
+        "shortage": round(shortage, 4),
+        "rebound": round(rebound, 4),
+    }
+
+
+def classify_recovery_stage(
+    shortage,
+    rebound,
+):
+    # 回測顯示深度欠缺並不代表回補更強。
+    if shortage >= 0.30:
+        return "深度欠缺觀察"
+
+    # 欠缺很輕、且短期尚未明顯拉升：
+    # 回測 next1 表現最佳，視為「回補前段」。
+    if shortage < 0.10 and rebound < 0.30:
+        return "回補蓄勢"
+
+    # 輕度欠缺 + 明顯短期回升：
+    # next3 / next5 表現較佳，視為正在回補。
+    if shortage < 0.10 and rebound >= 0.90:
+        return "強回補"
+
+    if shortage < 0.10 and rebound >= 0.30:
+        return "回補延續"
+
+    # 0.10~0.20 欠缺區，回升 0.30~0.60 的回測表現相對較佳。
+    if shortage < 0.20 and 0.30 <= rebound < 0.60:
+        return "回補升溫"
+
+    if shortage < 0.20:
+        return "回補觀察"
+
+    # 0.20~0.30 樣本較少；保留訊號但降低優先度。
+    if shortage < 0.30 and rebound < 0.30:
+        return "回補蓄勢"
+
+    return "回補觀察"
+
+
+def get_recovery_momentum(include_special=False):
+    include_special = normalize_include_special(include_special)
+    draws = load_draws_from_db()
+    results = build_analysis(
+        draws,
+        include_special=include_special,
+    )
+
+    output = []
+
+    for item in results:
+        r10 = float(item["r10"])
+        r30 = float(item["r30"])
+        r50 = float(item["r50"])
+        r100 = float(item["r100"])
+
+        # A2 候選門檻沿用正式回測條件：
+        # r50 < 1 或 r100 < 1；r10 > 1；r10 > r30。
+        if not (
+            (r50 < 1.0 or r100 < 1.0)
+            and r10 > 1.0
+            and r10 > r30
+        ):
+            continue
+
+        recovery = calculate_recovery_score(
+            r10,
+            r30,
+            r50,
+            r100,
+        )
+
+        stage = classify_recovery_stage(
+            recovery["shortage"],
+            recovery["rebound"],
+        )
+
+        output.append({
+            "number": int(item["number"]),
+            "recovery_score": recovery["recovery_score"],
+            "stage": stage,
+            "v7_score": item["score"],
+            "grade": item["grade"],
+            "momentum_type": item["momentum_type"],
+            "momentum": {
+                "10": round(r10, 2),
+                "30": round(r30, 2),
+                "50": round(r50, 2),
+                "100": round(r100, 2),
+            },
+            "change": {
+                "shortage": recovery["shortage"],
+                "rebound": recovery["rebound"],
+            },
+        })
+
+    # 不以 recovery_score 單純由高到低排列。
+    # 先依回測後的回補階段，再用分數與短期回升做同級排序。
+    stage_priority = {
+        "強回補": 0,
+        "回補蓄勢": 1,
+        "回補升溫": 2,
+        "回補延續": 3,
+        "回補觀察": 4,
+        "深度欠缺觀察": 5,
+    }
+
+    output.sort(
+        key=lambda x: (
+            stage_priority.get(x["stage"], 99),
+            -x["recovery_score"],
+            -x["change"]["rebound"],
+            x["number"],
+        )
+    )
+
+    return {
+        "engine_version": ENGINE_VERSION,
+        "analysis_engine": "recovery_momentum_a2_biglotto",
+        "formula_version": "a2_v1.0",
+        "analysis_mode": analysis_mode_name(include_special),
+        "include_special": include_special,
+        "expected_probability": (
+            "7/49" if include_special else "6/49"
+        ),
+        "latest_draw": build_latest_draw(draws),
+        "rule": {
+            "candidate": (
+                "(r50 < 1.00 or r100 < 1.00) "
+                "and r10 > 1.00 and r10 > r30"
+            ),
+            "formula": (
+                "shortage*0.60 + rebound*0.40; "
+                "shortage=max(0,1-r50)*0.50 + "
+                "max(0,1-r100)*0.50; "
+                "rebound=max(0,r10-r30)"
+            ),
+            "note": "回補分數不是越高越好；深度欠缺降低優先度",
+        },
+        "count": len(output),
+        "numbers": output,
+    }
+
+
+# ============================================================
 # V7 Top10
 # ============================================================
 
