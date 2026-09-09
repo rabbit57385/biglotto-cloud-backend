@@ -655,7 +655,7 @@ def get_recent_draws_with_grades(limit=10, include_special=False):
 
     for index in range(len(draws) - 1, first_index - 1, -1):
         # 嚴格使用「截至該期」的資料，避免未來資料洩漏。
-        historical_draws = draws[: index + 1]
+        historical_draws = draws[:index]
 
         results = build_analysis(
             historical_draws,
