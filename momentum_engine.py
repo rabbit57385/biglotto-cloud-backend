@@ -625,3 +625,73 @@ def get_frozen_prediction(include_special=False):
         "details":
             details,
     }
+
+# ============================================================
+# 最近 N 期開獎 + 各期「當時」A-E 分級（大樂透）
+#
+# - 預設最近 10 期，最多 100 期。
+# - 每一期只使用截至該期為止的歷史資料計算分級，
+#   不會使用該期之後的未來資料。
+# - 主號固定顯示 6 顆。
+# - 特別號獨立顯示，並附上該期當時的 A-E 分級。
+# - include_special=False：A-E 依 6/49 模式計算。
+# - include_special=True：A-E 依 7/49（主號+特別號）模式計算。
+# ============================================================
+
+def get_recent_draws_with_grades(limit=10, include_special=False):
+    include_special = normalize_include_special(include_special)
+    draws = load_draws_from_db()
+
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 10
+
+    limit = max(1, min(limit, 100))
+
+    # V7 正式分析至少需要 100 期，因此最早只能從第 100 期開始回推。
+    first_index = max(99, len(draws) - limit)
+    output = []
+
+    for index in range(len(draws) - 1, first_index - 1, -1):
+        # 嚴格使用「截至該期」的資料，避免未來資料洩漏。
+        historical_draws = draws[: index + 1]
+
+        results = build_analysis(
+            historical_draws,
+            include_special=include_special,
+        )
+
+        grade_map = {
+            int(item["number"]): item["grade"]
+            for item in results
+        }
+
+        draw = draws[index]
+        main_numbers = list(draw[2:8])
+        special_number = int(draw[8])
+
+        output.append({
+            "draw_no": str(draw[0]),
+            "draw_date": str(draw[1]),
+            "numbers": [
+                {
+                    "number": int(number),
+                    "grade": grade_map.get(int(number)),
+                }
+                for number in main_numbers
+            ],
+            "special_number": {
+                "number": special_number,
+                "grade": grade_map.get(special_number),
+            },
+        })
+
+    return {
+        "engine_version": ENGINE_VERSION,
+        "analysis_mode": analysis_mode_name(include_special),
+        "include_special": include_special,
+        "count": len(output),
+        "draws": output,
+    }
+

@@ -8,6 +8,7 @@ from psycopg.rows import dict_row
 from momentum_engine import (
     get_momentum_analysis,
     get_today_momentum_changes,
+    get_recent_draws_with_grades,
 )
 
 
@@ -151,57 +152,23 @@ def frozen_top5(
     }
 
 @app.get("/api/v1/biglotto/recent-draws")
-def recent_draws(limit: int = 10):
-    safe_limit = max(1, min(limit, 100))
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise HTTPException(status_code=500, detail="DATABASE_URL is not configured")
-
-    sql = """
-        SELECT
-            draw_no,
-            draw_date,
-            number1,
-            number2,
-            number3,
-            number4,
-            number5,
-            number6,
-            special_number
-        FROM biglotto_draws
-        ORDER BY draw_no::bigint DESC
-        LIMIT %s
-    """
-
+def recent_draws(
+    limit: int = 10,
+    include_special: bool = False,
+):
     try:
-        with psycopg.connect(database_url, row_factory=dict_row) as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, (safe_limit,))
-                rows = cur.fetchall()
+        result = get_recent_draws_with_grades(
+            limit=limit,
+            include_special=include_special,
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-    draws = []
-    for row in rows:
-        draws.append({
-            "draw_no": str(row["draw_no"]),
-            "draw_date": row["draw_date"].isoformat(),
-            "numbers": [
-                row["number1"],
-                row["number2"],
-                row["number3"],
-                row["number4"],
-                row["number5"],
-                row["number6"],
-            ],
-            "special_number": row["special_number"],
-        })
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
 
     return {
         "status": "ok",
-        "data": {
-            "count": len(draws),
-            "draws": draws,
-        },
+        "data": result,
     }
 
