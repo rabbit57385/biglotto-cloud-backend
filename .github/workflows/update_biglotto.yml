@@ -1,0 +1,41 @@
+name: Update Big Lotto Draws
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run without writing to database"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: biglotto-database-update
+  cancel-in-progress: false
+
+jobs:
+  update-biglotto:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Preview missing Big Lotto draws
+        if: ${{ inputs.dry_run == true }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -B update_biglotto.py --dry-run
+      - name: Fill missing Big Lotto draws
+        if: ${{ inputs.dry_run == false }}
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -B update_biglotto.py
