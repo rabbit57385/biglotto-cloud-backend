@@ -322,25 +322,28 @@ class DatabaseAuditTests(unittest.TestCase):
         self.assertEqual(result['status'],'ok')
         self.assertEqual(result['missing_count'],0)
 
-    def test_workflow_is_manual_and_defaults_to_dry_run(self):
+    def test_workflow_schedules_updates_and_preserves_manual_dry_run(self):
         root=Path(__file__).resolve().parents[1]
         self.assertFalse((root/'.github/workflows/update_539.yml').exists())
         text=(root/'.github/workflows/update_biglotto.yml').read_text(encoding='utf-8')
         trigger=text.split('on:\n',1)[1].split('\npermissions:',1)[0]
         self.assertEqual([line.strip() for line in trigger.splitlines()
                           if line.startswith('  ') and not line.startswith('   ')],
-                         ['workflow_dispatch:'])
-        self.assertNotIn('schedule:',text)
-        self.assertNotIn('cron:',text)
+                         ['workflow_dispatch:','schedule:'])
+        self.assertEqual([line.strip() for line in trigger.splitlines()
+                          if line.strip().startswith('- cron:')],
+                         ['- cron: "35,50 13 * * 2,5"',
+                          '- cron: "5,35 14 * * 2,5"',
+                          '- cron: "45 14 * * *"'])
         for expected in ['dry_run:','required: true','default: true','type: boolean',
                          'concurrency:','cancel-in-progress: false']:
             self.assertIn(expected,text)
         steps=text.split('      - name: ')
         dry_step=next(step for step in steps if 'Preview missing Big Lotto draws' in step)
         write_step=next(step for step in steps if 'Fill missing Big Lotto draws' in step)
-        self.assertIn('if: ${{ inputs.dry_run == true }}',dry_step)
+        self.assertIn("if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}",dry_step)
         self.assertIn('run: python -B update_biglotto.py --dry-run',dry_step)
-        self.assertIn('if: ${{ inputs.dry_run == false }}',write_step)
+        self.assertIn("if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}",write_step)
         self.assertIn('run: python -B update_biglotto.py\n',write_step)
         self.assertNotIn('--dry-run',write_step)
         for step in [dry_step,write_step]:
