@@ -1,3 +1,11 @@
+from additional_analysis import (
+    get_overheat_momentum,
+    get_draw_counts,
+    get_missing_numbers,
+    get_count_missing_cross,
+    get_smart_selection,
+)
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -235,4 +243,95 @@ def recent_draws(
         "status": "ok",
         "data": result,
     }
+
+
+@app.get("/api/v1/biglotto/overheat-warning")
+def overheat_warning(include_special: bool = False):
+    try:
+        data = get_overheat_momentum(include_special=include_special)
+        return {
+            "status": "ok",
+            "data": data,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+
+@app.get("/api/v1/biglotto/draw-counts")
+def draw_counts(include_special: bool = False):
+    try:
+        data = get_draw_counts(include_special=include_special)
+        return {
+            "status": "ok",
+            "data": data,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+
+@app.get("/api/v1/biglotto/missing-numbers")
+def missing_numbers(include_special: bool = False):
+    try:
+        data = get_missing_numbers(include_special=include_special)
+        return {
+            "status": "ok",
+            "data": data,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+
+@app.get("/api/v1/biglotto/count-missing-cross")
+def count_missing_cross(window: int = 30, include_special: bool = False):
+    if window not in (10, 30, 50, 100):
+        raise HTTPException(
+            status_code=400,
+            detail="window 僅支援 10、30、50、100",
+        )
+
+    try:
+        data = get_count_missing_cross(window=window, include_special=include_special)
+        return {
+            "status": "ok",
+            "data": data,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e),
+        )
+
+
+@app.get("/api/v1/biglotto/smart-selection")
+def smart_selection(
+    count: int = 6,
+    strategy: str = "balanced",
+    locked: str = "",
+    excluded: str = "",
+    include_special: bool = False,
+):
+    try:
+        data = get_smart_selection(
+            count=count,
+            strategy=strategy,
+            locked=locked,
+            excluded=excluded,
+            include_special=include_special,
+        )
+        return {"status": "ok", "data": data}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
