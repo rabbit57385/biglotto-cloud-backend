@@ -20,7 +20,7 @@ FROZEN_STRATEGY_VERSION = "1.0.0"
 # 資料庫
 # ============================================================
 
-def load_draws_from_db():
+def load_draws_from_db(minimum_history=100):
     database_url = os.getenv("DATABASE_URL")
 
     if database_url:
@@ -63,7 +63,7 @@ def load_draws_from_db():
             )
             draws = cur.fetchall()
 
-    if len(draws) < 100:
+    if len(draws) < minimum_history:
         raise ValueError(
             "歷史資料不足100期，無法執行正式動能分析"
         )

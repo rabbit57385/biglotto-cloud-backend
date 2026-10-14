@@ -1,3 +1,5 @@
+from typing import Literal
+from grade_history import get_grade_history, HistoryDataError
 from additional_analysis import (
     get_overheat_momentum,
     get_draw_counts,
@@ -335,3 +337,14 @@ def smart_selection(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+@app.get("/api/v1/biglotto/grade-history")
+def grade_history(window: Literal["10", "30", "50", "100"] = "30",
+                  include_special: Literal["true", "false"] = "false"):
+    try:
+        return {"status": "ok", "data": get_grade_history(int(window), include_special == "true")}
+    except HistoryDataError as error:
+        raise HTTPException(status_code=503, detail={"code": "invalid_history_data", "message": str(error)}) from error
+    except Exception as error:
+        raise HTTPException(status_code=503, detail={"code": "grade_history_unavailable"}) from error

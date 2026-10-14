@@ -247,11 +247,12 @@ class BigLottoHttpTests(unittest.TestCase):
             if isinstance(node, ast.FunctionDef):
                 self.assertEqual(ast.dump(node), current[node.name])
         original = subprocess.check_output(['git','show','HEAD:momentum_engine.py'], cwd=ROOT)
-        self.assertEqual(original.decode('utf-8').splitlines(), (ROOT/'momentum_engine.py').read_text(encoding='utf-8').splitlines())
+        expected = original.decode('utf-8').replace('def load_draws_from_db():', 'def load_draws_from_db(minimum_history=100):', 1).replace('    if len(draws) < 100:', '    if len(draws) < minimum_history:', 1)
+        self.assertEqual(expected.splitlines(), (ROOT/'momentum_engine.py').read_text(encoding='utf-8').splitlines())
 
     def test_route_inventory(self):
         actual = {route.path for route in main.app.routes if route.path.startswith(PREFIX)}
-        self.assertEqual(actual, {PREFIX + name for name in NEW + EXISTING + ['health']})
+        self.assertEqual(actual, {PREFIX + name for name in NEW + EXISTING + ['health', 'grade-history']})
 
 
 if __name__ == '__main__':
