@@ -104,7 +104,7 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('secrets.BIGLOTTO_CATCHUP_TOKEN', TEXT)
         self.assertNotIn('DATABASE_URL', TEXT.split('- name: Catch up through')[1])
         self.assertEqual([x.strip() for x in TEXT.splitlines() if 'cron:' in x],
-                         ['- cron: "35,50 13 * * 2,5"', '- cron: "5,35 14 * * 2,5"', '- cron: "45 14 * * *"'])
+                         ['- cron: "1,6,11,16 13 * * 2,5"', '- cron: "19 13 * * *"'])
         source = (WORKFLOW.parents[2] / 'update_biglotto.py').read_text(encoding='utf-8')
         fn = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == 'sync_draws')
         self.assertIn(' READ ONLY', ast.get_source_segment(source, fn))

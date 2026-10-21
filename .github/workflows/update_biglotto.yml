@@ -10,9 +10,8 @@ on:
         type: boolean
 
   schedule:
-    - cron: "35,50 13 * * 2,5"
-    - cron: "5,35 14 * * 2,5"
-    - cron: "45 14 * * *"
+    - cron: "1,6,11,16 13 * * 2,5"
+    - cron: "19 13 * * *"
 
 permissions:
   contents: read
