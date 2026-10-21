@@ -39,8 +39,98 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python -B update_biglotto.py --dry-run
-      - name: Fill missing Big Lotto draws
+      - name: Catch up through the single server writer
         if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: python -B update_biglotto.py
+          BIGLOTTO_CATCHUP_TOKEN: ${{ secrets.BIGLOTTO_CATCHUP_TOKEN }}
+        run: |
+          python -B - <<'PY'
+          import datetime
+          import json
+          import os
+          import urllib.request
+
+          BASE = 'https://five39-cloud-backend.onrender.com/api/v1/biglotto'
+
+          class Unverified(Exception):
+              pass
+
+          def request(path, token=None):
+              headers = {'Accept': 'application/json'}
+              if token is not None:
+                  headers['Authorization'] = 'Bearer ' + token
+              req = urllib.request.Request(BASE + path, headers=headers,
+                                           method='POST' if token is not None else 'GET')
+              # No retries or redirects: a lost POST acknowledgement may hide a commit.
+              class NoRedirect(urllib.request.HTTPRedirectHandler):
+                  def redirect_request(self, *args, **kwargs):
+                      return None
+              opener = urllib.request.build_opener(NoRedirect())
+              with opener.open(req, timeout=120 if token is not None else 15) as response:
+                  code = response.status
+                  raw = response.read(1024 * 1024 + 1)
+                  if len(raw) > 1024 * 1024:
+                      raise Unverified()
+                  payload = json.loads(raw)
+              return code, payload
+
+          def identity(value, graded=False):
+              if not isinstance(value, dict):
+                  raise Unverified()
+              issue, day = value['draw_no'], value['draw_date']
+              if not isinstance(issue, str) or not issue.isdigit():
+                  raise Unverified()
+              if datetime.date.fromisoformat(day).isoformat() != day:
+                  raise Unverified()
+              numbers = value['numbers']
+              special = value['special_number']
+              if graded:
+                  numbers = [item['number'] for item in numbers]
+                  special = special['number']
+              if (len(numbers) != 6 or len(set(numbers)) != 6
+                      or any(type(n) is not int or not 1 <= n <= 49 for n in numbers)
+                      or type(special) is not int or not 1 <= special <= 49
+                      or special in numbers):
+                  raise Unverified()
+              return issue, day, tuple(sorted(numbers)), special
+
+          def main():
+              token = os.environ.get('BIGLOTTO_CATCHUP_TOKEN', '')
+              if len(token) < 32:
+                  print('FAILED: catch-up authorization is not configured')
+                  return 1
+              try:
+                  code, result = request('/catch-up', token)
+                  disposition = result['disposition']
+                  if disposition in ('cooldown', 'in_progress'):
+                      if code != (202 if disposition == 'in_progress' else 200):
+                          raise Unverified()
+                      print('DEFERRED: ' + disposition + '; synchronization NOT verified; no retry')
+                      return 0
+                  if code != 200 or disposition != 'completed' or result['result']['status'] != 'ok':
+                      raise Unverified()
+                  accepted = result['freshness']
+                  code, fresh = request('/freshness')
+                  if (code != 200 or fresh['status'] != 'up_to_date'
+                          or type(fresh['sync_revision']) is not int or fresh['sync_revision'] < 0
+                          or fresh['sync_revision'] != accepted['sync_revision']
+                          or identity(fresh['latest_draw']) != identity(accepted['latest_draw'])
+                          or identity(fresh['latest_verified_draw']) != identity(fresh['latest_draw'])):
+                      raise Unverified()
+                  code, recent = request('/recent-draws?limit=1&include_special=false')
+                  data = recent['data']
+                  if (code != 200 or recent['status'] != 'ok'
+                          or data['include_special'] is not False or data['analysis_mode'] != 'main_only'
+                          or data['count'] != 1 or len(data['draws']) != 1
+                          or identity(data['draws'][0], True) != identity(fresh['latest_draw'])):
+                      raise Unverified()
+              except Exception:
+                  # Never print HTTP bodies, headers, raw exceptions or credentials.
+                  print('FAILED: synchronization unverified; outcome may be unknown; no automatic retry')
+                  return 1
+              print('VERIFIED: catch-up completed; freshness and recent-draw identity match')
+              return 0
+
+          if __name__ == '__main__':
+              raise SystemExit(main())
+          PY
