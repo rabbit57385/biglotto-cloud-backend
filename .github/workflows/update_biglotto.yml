@@ -24,6 +24,12 @@ jobs:
   update-biglotto:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    env:
+      RESEARCH_CAPTURE_ENABLED: ${{ vars.RESEARCH_CAPTURE_ENABLED }}
+      CAPTURE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -33,15 +39,77 @@ jobs:
           python-version: "3.13"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      - name: Check capture switch (exact string true only)
+        id: capture_switch
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false)
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          CAPTURE_AUTH_TOKEN: ${{ github.token }}
+        run: python -B research_capture/bridge.py switch
+
+      # Prepare BEFORE official verification; never consume its 180-second window installing tools.
+      - name: Plan optional research capture
+        id: capture_plan
+        if: steps.capture_switch.outputs.enabled == 'true'
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          CAPTURE_CODE_TOKEN_AVAILABLE: ${{ secrets.RESEARCH_CAPTURE_CODE_READ_TOKEN != '' }}
+          CAPTURE_AUTH_TOKEN: ${{ github.token }}
+        run: python -B research_capture/bridge.py prepare
+
+      - name: Checkout approved private capture code
+        id: capture_checkout
+        timeout-minutes: 1
+        if: steps.capture_switch.outputs.enabled == 'true' && steps.capture_plan.outputs.ready == 'true'
+        continue-on-error: true
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: rabbit57385/lottery-marketing-automation
+          ref: ${{ steps.capture_plan.outputs.code_commit }}
+          token: ${{ secrets.RESEARCH_CAPTURE_CODE_READ_TOKEN }}
+          path: _research-code
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify capture code Commit
+        id: capture_commit
+        timeout-minutes: 1
+        if: steps.capture_switch.outputs.enabled == 'true' && steps.capture_checkout.outcome == 'success'
+        continue-on-error: true
+        env:
+          CAPTURE_AUTH_TOKEN: ${{ github.token }}
+        run: python -B research_capture/bridge.py verify-checkout --code _research-code
+
+      - name: Prepare capture Node runtime
+        id: capture_node
+        timeout-minutes: 1
+        if: steps.capture_switch.outputs.enabled == 'true' && steps.capture_commit.outcome == 'success' && steps.capture_commit.outputs.checkout_verified == 'true'
+        continue-on-error: true
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Prepare capture dependencies
+        id: capture_dependencies
+        timeout-minutes: 2
+        if: steps.capture_switch.outputs.enabled == 'true' && steps.capture_node.outcome == 'success'
+        continue-on-error: true
+        working-directory: _research-code
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Preview missing Big Lotto draws
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: python -B update_biglotto.py --dry-run
       - name: Catch up through the single server writer
+        id: update_draw
         if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.dry_run == false) }}
         env:
           BIGLOTTO_CATCHUP_TOKEN: ${{ secrets.BIGLOTTO_CATCHUP_TOKEN }}
+          CAPTURE_AUTHORIZED: ${{ steps.capture_switch.outputs.enabled }}
         run: |
           python -B - <<'PY'
           import datetime
@@ -128,8 +196,75 @@ jobs:
                   print('FAILED: synchronization unverified; outcome may be unknown; no automatic retry')
                   return 1
               print('VERIFIED: catch-up completed; freshness and recent-draw identity match')
+              # Sidecar only: never changes official success, retries, or exit code.
+              try:
+                  from research_capture.bridge import save_sync_evidence
+                  save_sync_evidence(result, fresh, recent, os.environ)
+              except BaseException:
+                  print('CAPTURE_EVIDENCE_FAILED: APP update remains successful')
               return 0
 
           if __name__ == '__main__':
               raise SystemExit(main())
           PY
+
+      - name: Validate official evidence for capture
+        id: capture_gate
+        if: steps.capture_switch.outputs.enabled == 'true' && steps.update_draw.outcome == 'success' && steps.capture_dependencies.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          CAPTURE_AUTH_TOKEN: ${{ github.token }}
+        run: python -B research_capture/bridge.py gate --result "$RUNNER_TEMP/biglotto-sync-evidence.json" --update-exit 0 --proof "$RUNNER_TEMP/biglotto-sync-proof.json"
+
+      - name: Capture verified research data (never retries APP update)
+        id: capture_collect
+        timeout-minutes: 4
+        if: steps.capture_switch.outputs.enabled == 'true' && steps.update_draw.outcome == 'success' && steps.capture_gate.outputs.capture_eligible == 'true' && steps.capture_dependencies.outcome == 'success'
+        continue-on-error: true
+        env:
+          CAPTURE_AUTH_TOKEN: ${{ github.token }}
+        run: python -B research_capture/bridge.py capture --proof "$RUNNER_TEMP/biglotto-sync-proof.json" --code _research-code
+
+      - name: Upload immutable capture only
+        id: capture_upload
+        timeout-minutes: 2
+        if: steps.capture_switch.outputs.enabled == 'true' && steps.capture_collect.outputs.ready == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.capture_plan.outputs.artifact_name }}
+          path: _research-code/artifacts/captures/${{ steps.capture_plan.outputs.artifact_name }}/research-capture.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: false
+          include-hidden-files: false
+
+      - name: Report research capture separately
+        if: always()
+        timeout-minutes: 1
+        continue-on-error: true
+        env:
+          APP_UPDATE_OUTCOME: ${{ steps.update_draw.outcome }}
+          CAPTURE_AUTHORIZED: ${{ steps.capture_switch.outputs.enabled }}
+          CAPTURE_AUTH_MODE: ${{ steps.capture_switch.outputs.mode }}
+          CAPTURE_AUTH_SOURCE_SHA: ${{ steps.capture_switch.outputs.source_commit }}
+          CAPTURE_AUTH_POLICY_SHA: ${{ steps.capture_switch.outputs.policy_sha256 }}
+          CAPTURE_AUTH_BLOB_SHA: ${{ steps.capture_switch.outputs.policy_blob_sha }}
+          CAPTURE_AUTH_RUN_NUMBER: ${{ steps.capture_switch.outputs.run_number }}
+          CAPTURE_AUTH_WORKFLOW_ID: ${{ steps.capture_switch.outputs.workflow_id }}
+          CAPTURE_AUTH_RUN_ID: ${{ steps.capture_switch.outputs.run_id }}
+          CAPTURE_AUTH_RUN_ATTEMPT: ${{ steps.capture_switch.outputs.run_attempt }}
+          PLAN_READY: ${{ steps.capture_plan.outputs.ready }}
+          CHECKOUT_OUTCOME: ${{ steps.capture_checkout.outcome }}
+          COMMIT_OUTCOME: ${{ steps.capture_commit.outcome }}
+          NODE_OUTCOME: ${{ steps.capture_node.outcome }}
+          SYNC_ELIGIBLE: ${{ steps.capture_gate.outputs.capture_eligible }}
+          SYNC_REASON: ${{ steps.capture_gate.outputs.reason }}
+          CAPTURE_PREPARED: ${{ steps.capture_dependencies.outcome }}
+          CAPTURE_READY: ${{ steps.capture_collect.outputs.ready }}
+          CAPTURE_REASON: ${{ steps.capture_collect.outputs.reason }}
+          UPLOAD_OUTCOME: ${{ steps.capture_upload.outcome }}
+          ARTIFACT_ID: ${{ steps.capture_upload.outputs.artifact-id }}
+          ARTIFACT_DIGEST: ${{ steps.capture_upload.outputs.artifact-digest }}
+        run: python -B research_capture/bridge.py summary

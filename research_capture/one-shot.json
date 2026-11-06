@@ -1,0 +1,14 @@
+{
+  "schema_version": "biglotto-capture-one-shot-v1",
+  "enabled": false,
+  "repository": "rabbit57385/biglotto-cloud-backend",
+  "workflow_path": ".github/workflows/update_biglotto.yml",
+  "workflow_id": null,
+  "run_number": null,
+  "event": "schedule",
+  "branch": "master",
+  "run_attempt": 1,
+  "not_before": null,
+  "expires_at": null,
+  "capture_commit": "7d6d8f6bd56dfade8d6814fb698bb65f8e7bffb1"
+}

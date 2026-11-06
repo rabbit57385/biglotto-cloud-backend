@@ -1,0 +1,84 @@
+name: Capture code private checkout preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-code-preflight-master
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.repository == 'rabbit57385/biglotto-cloud-backend' && github.ref == 'refs/heads/master' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout preflight helpers
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: research_capture
+          sparse-checkout-cone-mode: false
+
+      - name: Plan fixed private checkout (no database credential)
+        id: plan
+        timeout-minutes: 1
+        env:
+          CAPTURE_CODE_TOKEN_AVAILABLE: ${{ secrets.RESEARCH_CAPTURE_CODE_READ_TOKEN != '' }}
+        run: python -B research_capture/preflight.py plan
+
+      - name: Checkout exact marketing Commit
+        id: code
+        timeout-minutes: 2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: rabbit57385/lottery-marketing-automation
+          ref: ${{ steps.plan.outputs.code_commit }}
+          token: ${{ secrets.RESEARCH_CAPTURE_CODE_READ_TOKEN }}
+          path: _research-code
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify complete checked out SHA
+        id: head
+        timeout-minutes: 1
+        run: python -B research_capture/preflight.py head --code _research-code
+
+      - name: Prepare Node 24
+        id: node_setup
+        timeout-minutes: 2
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+
+      - name: Verify Node version
+        id: node_check
+        timeout-minutes: 1
+        run: python -B research_capture/preflight.py node
+
+      - name: Install lockfile dependencies without lifecycle scripts
+        id: dependencies
+        timeout-minutes: 3
+        working-directory: _research-code
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Import capture modules only (fetch denied)
+        id: imports
+        timeout-minutes: 1
+        run: python -B research_capture/preflight.py imports --code _research-code
+
+      - name: Report explicit preflight result
+        if: always()
+        env:
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          CHECKOUT_OUTCOME: ${{ steps.code.outcome }}
+          HEAD_OUTCOME: ${{ steps.head.outcome }}
+          NODE_SETUP_OUTCOME: ${{ steps.node_setup.outcome }}
+          NODE_CHECK_OUTCOME: ${{ steps.node_check.outcome }}
+          DEPENDENCY_OUTCOME: ${{ steps.dependencies.outcome }}
+          IMPORT_OUTCOME: ${{ steps.imports.outcome }}
+        run: python -B research_capture/preflight.py report
