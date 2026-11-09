@@ -1,0 +1,28 @@
+name: Dispatch Permission Test
+
+"on":
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Report harmless dispatch success
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'rabbit57385/biglotto-cloud-backend'
+          test "$GITHUB_EVENT_NAME" = 'workflow_dispatch'
+          test "$GITHUB_REF_NAME" = 'master'
+          printf '%s=%s\n' \
+            'repository' "$GITHUB_REPOSITORY" \
+            'workflow' "$GITHUB_WORKFLOW" \
+            'event' "$GITHUB_EVENT_NAME" \
+            'branch' "$GITHUB_REF_NAME" \
+            'run_id' "$GITHUB_RUN_ID" \
+            'run_attempt' "$GITHUB_RUN_ATTEMPT" \
+            'head_sha' "$GITHUB_SHA"
+          printf '%s\n' 'DISPATCH_PERMISSION_TEST_SUCCESS'
