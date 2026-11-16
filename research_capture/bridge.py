@@ -19,7 +19,7 @@ SOURCE_REPO = 'rabbit57385/lottery-marketing-automation'
 UPDATER_REPO = 'rabbit57385/biglotto-cloud-backend'
 WORKFLOW = '.github/workflows/update_biglotto.yml'
 ORIGIN = 'https://five39-cloud-backend.onrender.com'
-CAPTURE_COMMIT = '7d6d8f6bd56dfade8d6814fb698bb65f8e7bffb1'
+CAPTURE_COMMIT = '53ae102faa7eb9ec0be6d94772e1dd01a5cac1a3'
 POLICY_PATH = 'research_capture/one-shot.json'
 FAILURE_CODES = {'CAPTURE_DISABLED', 'CHECKOUT_FAILED', 'DEPENDENCY_FAILED', 'CAPTURE_STALE',
                  'CAPTURE_TIMEOUT', 'CAPTURE_REVISION_CHANGED', 'CAPTURE_ARTIFACT_FAILED', 'CAPTURE_FAILED', 'PUBLIC_ARTIFACT_BLOCKED'}
@@ -402,10 +402,10 @@ def public_artifact(capture, env=None):
                         'data_quality_status', 'missing_metrics', 'unsupported_metrics', 'snapshot_created_at'}
     source = snapshot.get('source', {})
     metrics = snapshot.get('metrics', {})
-    resources = ('freshness', 'analysis', 'momentum-changes', 'draw-counts', 'missing-numbers')
+    resources = ('freshness', 'analysis', 'momentum-changes', 'draw-counts', 'missing-numbers', 'focus-observation')
     endpoints = {ORIGIN + '/api/v1/biglotto/' + name + ('?include_special=false' if name != 'freshness' else '') for name in resources}
     if (set(capture) != expected or not isinstance(snapshot, dict) or not set(snapshot) <= allowed_snapshot
-            or not isinstance(metrics, dict) or not set(metrics) <= {'momentum', 'grades', 'grade_changes', 'omissions', 'frequency'}
+            or not isinstance(metrics, dict) or not set(metrics) <= {'momentum', 'grades', 'grade_changes', 'omissions', 'frequency', 'focus'}
             or set(source) != {'id', 'kind', 'endpoint', 'verified', 'updated_at', 'update_frequency', 'methodology'}
             or source.get('kind') != 'public_api' or source.get('verified') is not True
             or source.get('id') != 'render_biglotto_public_v1' or source.get('endpoint') not in endpoints
@@ -431,6 +431,21 @@ def public_artifact(capture, env=None):
         if not exact(metric, ('as_of_draw_id', 'value')):
             raise ValueError('PUBLIC_ARTIFACT_BLOCKED')
         values = metric['value']
+        if category == 'focus':
+            if (not exact(values, ('numbers', 'method', 'observations', 'source_proof'))
+                    or not isinstance(values['method'], str) or not values['method'].startswith('focus_observation_v1_biglotto:')
+                    and not values['method'].startswith('focus_observation_v1_biglotto\uFF1A')
+                    or not isinstance(values['numbers'], list) or len(values['numbers']) != 49
+                    or not isinstance(values['observations'], list) or len(values['observations']) != 49
+                    or any(not exact(row, ('number', 'activity_score', 'positive_signal_count', 'risk', 'risk_stage', 'risk_label')) for row in values['observations'])
+                    or not exact(values['source_proof'], ('source_revision', 'data_revision', 'snapshot_id', 'raw_sha256', 'formula_versions'))):
+                raise ValueError('PUBLIC_ARTIFACT_BLOCKED')
+            proof = values['source_proof']
+            patterns = {'source_revision': r'biglotto-source-v1:[a-f0-9]{64}', 'data_revision': r'biglotto-data-v1:[a-f0-9]{64}', 'snapshot_id': r'biglotto-focus-v1:[a-f0-9]{64}', 'raw_sha256': r'[a-f0-9]{64}'}
+            expected_versions = {'momentum': '7.0.0', 'explosion': 'a1_v1.0', 'recovery': 'a2_v1.0', 'reversal': 'a3_v3.0', 'overheat': 'a4_v2.0_biglotto', 'frozen_strategy': 'long_hot_v1', 'frozen': '1.0.0'}
+            if any(not isinstance(proof[k], str) or not re.fullmatch(pattern, proof[k]) for k, pattern in patterns.items()) or proof['formula_versions'] != expected_versions:
+                raise ValueError('PUBLIC_ARTIFACT_BLOCKED')
+            continue
         if category == 'frequency':
             if not exact(values, ('window_draws', 'counts')):
                 raise ValueError('PUBLIC_ARTIFACT_BLOCKED')
