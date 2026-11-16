@@ -19,7 +19,7 @@ SOURCE_REPO = 'rabbit57385/lottery-marketing-automation'
 UPDATER_REPO = 'rabbit57385/biglotto-cloud-backend'
 WORKFLOW = '.github/workflows/update_biglotto.yml'
 ORIGIN = 'https://five39-cloud-backend.onrender.com'
-CAPTURE_COMMIT = '53ae102faa7eb9ec0be6d94772e1dd01a5cac1a3'
+CAPTURE_COMMIT = '64d3359cb8600df324982304cd5b6beb17ce7c39'
 POLICY_PATH = 'research_capture/one-shot.json'
 FAILURE_CODES = {'CAPTURE_DISABLED', 'CHECKOUT_FAILED', 'DEPENDENCY_FAILED', 'CAPTURE_STALE',
                  'CAPTURE_TIMEOUT', 'CAPTURE_REVISION_CHANGED', 'CAPTURE_ARTIFACT_FAILED', 'CAPTURE_FAILED', 'PUBLIC_ARTIFACT_BLOCKED'}
